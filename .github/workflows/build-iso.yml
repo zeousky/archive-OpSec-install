@@ -1,0 +1,133 @@
+name: Build opsecOS ISO
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build opsecOS ISO (Debian trixie container)
+        run: |
+          docker run --rm --privileged \
+            -v "${GITHUB_WORKSPACE}:/src" \
+            -w /src \
+            debian:trixie \
+            bash -c '
+              set -e
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                live-build debootstrap xorriso isolinux syslinux-efi \
+                grub-pc-bin grub-efi-amd64-bin mtools dosfstools squashfs-tools \
+                ca-certificates curl gnupg python3 fakeroot apt-utils
+              /src/iso-builder/build-iso.sh
+            '
+
+      - name: Prepare ISO for release
+        run: |
+          cd "${GITHUB_WORKSPACE}"
+          sudo chmod 644 opsecOS-1.0.0-amd64.iso
+          ls -lh opsecOS-1.0.0-amd64.iso
+          file opsecOS-1.0.0-amd64.iso
+          echo "ISO_SIZE=$(du -h opsecOS-1.0.0-amd64.iso | cut -f1)" >> $GITHUB_ENV
+
+      # Safety net: release assets cap at 2 GiB, workflow artifacts allow up
+      # to 5 GiB — the ISO is always downloadable from this run's artifacts.
+      - name: Upload ISO as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: opsecos-iso
+          path: opsecOS-1.0.0-amd64.iso
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove stale release asset (allow rebuilds on same tag)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_type == 'tag' && github.ref_name || 'v1.0.0' }}"
+          gh release delete-asset "${TAG}" opsecOS-1.0.0-amd64.iso \
+            --repo "${GITHUB_REPOSITORY}" --yes 2>/dev/null || true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # On a tag push, use the pushed tag (e.g. v1.0.0).
+          # On manual dispatch (branch), fall back to v1.0.0.
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'v1.0.0' }}
+          name: "opsecOS 1.0.0"
+          body: |
+            ## opsecOS 1.0.0 - Security-Hardened Live Linux
+
+            Bootable live ISO featuring **opsecDE** (OpSec Desktop Environment)
+            and a **full graphical installer** ("Install opsecOS" on the desktop).
+
+            ### Included Software
+            - Mullvad VPN (auto-configured)
+            - Mullvad Browser (privacy-focused web browser)
+            - Proton Mail (desktop client)
+            - Debugging & security tools (gdb, strace, nmap, tcpdump, tshark, nikto, hydra, sqlmap, htop, btop, ...)
+
+            ### Security Hardening
+            - Kernel sysctl hardening (99-opsec-security.conf)
+            - UFW firewall (deny incoming, allow VPN ports)
+            - MAC address randomization on boot
+            - AppArmor-ready
+
+            ### Desktop Environment
+            - opsec-session (X11 session with Openbox)
+            - opsec-panel (status bar with VPN and firewall indicators)
+            - opsec-control-center (graphical security dashboard)
+            - Plank dock with pinned launchers
+            - Conky system monitor + Dunst notifications
+            - Custom privacy-themed wallpaper
+
+            ### Installation
+            Boot the ISO and click **"Install opsecOS"** (desktop/dock/panel) to
+            launch the full graphical Debian installer. The opsec suite is
+            installed automatically into the new system.
+
+            ### Quick Start (Live)
+            ```bash
+            # Write to USB (replace /dev/sdX with your drive)
+            sudo dd if=opsecOS-1.0.0-amd64.iso of=/dev/sdX bs=4M status=progress oflag=sync
+            ```
+
+            Or use [Balena Etcher](https://etcher.balena.io/) for a graphical tool.
+
+            **Default credentials:** user / live
+          files: ${{ github.workspace }}/opsecOS-1.0.0-amd64.iso
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish regenerated APT repo (GitHub Pages)
+        # build-repo.sh regenerates apt-repo inside the container; commit it so
+        # the Pages-hosted apt repository serves the updated packages.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd "${GITHUB_WORKSPACE}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apt-repo/Packages apt-repo/Packages.gz apt-repo/Release apt-repo/*.deb
+          if ! git diff --cached --quiet; then
+            git commit -m "build: regenerate apt repo with opsecOS 1.0.0 packages"
+            git push origin main
+            echo "apt-repo regenerated and pushed."
+          else
+            echo "No changes to apt-repo; skipping commit."
+          fi

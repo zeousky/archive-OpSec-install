@@ -1,0 +1,20 @@
+#!/bin/bash
+set -e
+
+export DESKTOP_SESSION=opsecDE
+export XDG_CURRENT_DESKTOP=opsecDE
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+
+# Apply security policies at session start. In the live ISO the `user` account
+# has passwordless sudo, so `sudo -n` applies the rules without prompting.
+if [ -x /usr/local/sbin/opsec-firewall.sh ]; then
+    sudo -n /usr/local/sbin/opsec-firewall.sh >/dev/null 2>&1 || true
+fi
+
+if [ -x /usr/local/sbin/mac-spoof.sh ]; then
+    sudo -n /usr/local/sbin/mac-spoof.sh >/dev/null 2>&1 || true
+fi
+
+# openbox reads ~/.config/openbox/autostart and starts the compositor, dock,
+# panel, conky, notifications and wallpaper.
+exec openbox

@@ -1,0 +1,26 @@
+#!/bin/bash
+set +e
+
+export DEBIAN_FRONTEND=noninteractive
+
+chmod +x /usr/bin/opsec-software 2>/dev/null || true
+
+# The real installer lives in the `opsec` package (/usr/bin/opsec-software-install).
+# If it is present, just run it (it is idempotent). Otherwise fall back to
+# pulling `opsec` from the opsec APT repo so this package still works standalone.
+if [ -x /usr/bin/opsec-software-install ]; then
+    /usr/bin/opsec-software-install
+    exit 0
+fi
+
+if command -v curl >/dev/null 2>&1; then
+    curl -fsSL https://officialckazros.github.io/OpSec-install/add-repo.sh | bash >/dev/null 2>&1
+    apt-get install -y --allow-unauthenticated opsec >/dev/null 2>&1
+fi
+
+if [ -x /usr/bin/opsec-software-install ]; then
+    /usr/bin/opsec-software-install
+    exit 0
+fi
+
+exit 0

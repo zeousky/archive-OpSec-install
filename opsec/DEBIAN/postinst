@@ -1,0 +1,17 @@
+#!/bin/bash
+set +e
+
+export DEBIAN_FRONTEND=noninteractive
+
+chmod +x /usr/bin/opsec /usr/bin/opsec-launch /usr/bin/opsec-software-install 2>/dev/null || true
+chmod +x /usr/local/sbin/opsec-firewall.sh /usr/local/sbin/mac-spoof.sh 2>/dev/null || true
+
+# Apply kernel hardening on installed systems (live ISO applies it via the hook).
+if [ -f /etc/sysctl.d/99-opsec-security.conf ]; then
+    sysctl --system >/dev/null 2>&1 || true
+fi
+
+# Install / refresh Mullvad VPN, Mullvad Browser and Proton Mail.
+/usr/bin/opsec-software-install
+
+exit 0
